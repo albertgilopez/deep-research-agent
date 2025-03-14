@@ -18,9 +18,19 @@ async def main():
     if not openai_api_key:
         openai_api_key = input("Por favor, introduce tu API key de OpenAI: ")
     
+    # Obtener la API key de FireCrawl (opcional, para usar la API en la nube)
+    firecrawl_api_key = os.getenv("FIRECRAWL_API_KEY")
+    
+    # Determinar si usar Docker local o la API en la nube
+    use_local_docker = True  # Cambiar a False para usar la API en la nube
+    
     # Inicializar el agente
     print("Inicializando DeepResearch Agent...")
-    agent = DeepResearchAgent(openai_api_key=openai_api_key, use_local_docker=True)
+    agent = DeepResearchAgent(
+        openai_api_key=openai_api_key,
+        use_local_docker=use_local_docker,
+        firecrawl_api_key=firecrawl_api_key
+    )
     
     # Ejemplo de pregunta de investigación
     question = "¿Cuáles son las últimas tendencias en inteligencia artificial generativa?"

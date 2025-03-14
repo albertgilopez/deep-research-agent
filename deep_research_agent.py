@@ -16,8 +16,17 @@ from typing import Dict, List, Optional, Any, Union
 from agents import Agent, Runner, function_tool
 
 # Import FireCrawl SDK
-from firecrawl.web_to_text import WebToTextExtractor
-from firecrawl.firecrawl import FirecrawlApp
+# Nota: La forma de importar puede variar según la versión de FireCrawl
+# Si encuentras errores, prueba con:
+# from firecrawl import WebToTextExtractor, FirecrawlApp
+try:
+    from firecrawl.web_to_text import WebToTextExtractor
+    from firecrawl.firecrawl import FirecrawlApp
+except ImportError:
+    try:
+        from firecrawl import WebToTextExtractor, FirecrawlApp
+    except ImportError:
+        raise ImportError("No se pudo importar FireCrawl. Asegúrate de tenerlo instalado con 'pip install firecrawl'")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -29,13 +38,14 @@ class DeepResearchAgent:
     on any topic.
     """
     
-    def __init__(self, openai_api_key: Optional[str] = None, use_local_docker: bool = True):
+    def __init__(self, openai_api_key: Optional[str] = None, use_local_docker: bool = True, firecrawl_api_key: Optional[str] = None):
         """
         Initialize the DeepResearchAgent.
         
         Args:
             openai_api_key: OpenAI API key (if None, will try to get from environment)
             use_local_docker: Whether to use a local Docker instance for FireCrawl
+            firecrawl_api_key: FireCrawl API key for cloud API (if None, will try to get from environment)
         """
         # Set OpenAI API key
         self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
@@ -45,12 +55,40 @@ class DeepResearchAgent:
         os.environ["OPENAI_API_KEY"] = self.openai_api_key
         
         # Initialize FireCrawl extractor
-        self.extractor = WebToTextExtractor.create_with_local_docker() if use_local_docker else WebToTextExtractor()
-        logger.info(f"Initialized WebToTextExtractor with {'local Docker' if use_local_docker else 'cloud API'}")
+        if use_local_docker:
+            logger.info("Initializing FireCrawl with local Docker")
+            try:
+                self.extractor = WebToTextExtractor.create_with_local_docker()
+                logger.info("Successfully initialized FireCrawl with local Docker")
+            except Exception as e:
+                logger.error(f"Error initializing FireCrawl with local Docker: {str(e)}")
+                logger.info("Falling back to cloud API...")
+                self.extractor = self._initialize_cloud_api(firecrawl_api_key)
+        else:
+            logger.info("Initializing FireCrawl with cloud API")
+            self.extractor = self._initialize_cloud_api(firecrawl_api_key)
         
         # Initialize agents
         self.agents = self._create_agents()
         logger.info("Initialized OpenAI Agents")
+    
+    def _initialize_cloud_api(self, firecrawl_api_key: Optional[str] = None):
+        """
+        Initialize FireCrawl with cloud API.
+        
+        Args:
+            firecrawl_api_key: FireCrawl API key (if None, will try to get from environment)
+            
+        Returns:
+            WebToTextExtractor instance
+        """
+        api_key = firecrawl_api_key or os.getenv("FIRECRAWL_API_KEY")
+        if not api_key:
+            logger.warning("No FireCrawl API key provided. Some features may not work properly.")
+            return WebToTextExtractor()
+        else:
+            logger.info("Using FireCrawl cloud API with provided API key")
+            return WebToTextExtractor(api_key=api_key)
     
     def _create_agents(self):
         """

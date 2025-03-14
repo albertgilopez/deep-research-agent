@@ -14,7 +14,7 @@ Este proyecto implementa un agente de investigación avanzado que combina el SDK
 
 - Python 3.8+
 - OpenAI API Key
-- Docker (para ejecutar FireCrawl en local)
+- FireCrawl (local vía Docker o API en la nube)
 
 ## Instalación
 
@@ -37,6 +37,36 @@ Este proyecto implementa un agente de investigación avanzado que combina el SDK
    ```
    $env:OPENAI_API_KEY="tu-api-key"
    ```
+
+4. Configuración de FireCrawl:
+
+   Tienes dos opciones para usar FireCrawl:
+
+   **Opción 1: Usar la imagen Docker oficial**
+   
+   La forma más sencilla de ejecutar FireCrawl localmente es usando la imagen Docker oficial:
+
+   ```
+   docker pull firecrawl/firecrawl:latest
+   docker run -d -p 8000:8000 firecrawl/firecrawl:latest
+   ```
+
+   **Opción 2: Usar la API en la nube**
+   
+   Alternativamente, puedes usar la API en la nube de FireCrawl. Para ello, necesitarás registrarte en [firecrawl.dev](https://firecrawl.dev) y obtener una API key.
+   
+   Luego, configura la API key en tu archivo `.env`:
+   ```
+   FIRECRAWL_API_KEY=tu_api_key_de_firecrawl
+   ```
+
+   **Opción 3: Ejecutar FireCrawl desde el código fuente**
+   
+   Si prefieres ejecutar FireCrawl desde el código fuente, sigue las instrucciones detalladas en la [guía de contribución de FireCrawl](https://docs.firecrawl.dev/contributing/guide).
+
+   Para más información sobre FireCrawl, consulta:
+   - [Documentación de FireCrawl - Open Source o Cloud](https://docs.firecrawl.dev/contributing/open-source-or-cloud)
+   - [Guía de contribución de FireCrawl](https://docs.firecrawl.dev/contributing/guide)
 
 ## Uso
 
