@@ -117,7 +117,7 @@ Este proyecto está licenciado bajo [MIT License](LICENSE).
 
 ## Artículo Relacionado
 
-Este proyecto acompaña al artículo de Medium: [Crea tu propio agente DeepResearch con el nuevo SDK Agents de OpenAI y FireCrawl](https://medium.com/@albertgilopez/crea-tu-propio-agente-deepresearch-con-el-nuevo-sdk-agents-de-openai-y-firecrawl-local-XXXXX).
+Este proyecto acompaña al artículo de Medium: [Crea tu propio agente DeepResearch con el nuevo SDK Agents de OpenAI y FireCrawl](https://medium.com/@jddam/crea-tu-propio-agente-deepresearch-con-el-nuevo-sdk-agents-de-openai-y-firecrawl-local-9a05e64539ac).
 
 ## Autor
 

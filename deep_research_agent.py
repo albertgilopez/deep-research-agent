@@ -14,19 +14,18 @@ from typing import Dict, List, Optional, Any, Union
 
 # Import OpenAI Agents SDK
 from agents import Agent, Runner, function_tool
+import openai
 
-# Import FireCrawl SDK
-# Nota: La forma de importar puede variar según la versión de FireCrawl
-# Si encuentras errores, prueba con:
-# from firecrawl import WebToTextExtractor, FirecrawlApp
+# Import FireCrawl
 try:
-    from firecrawl.web_to_text import WebToTextExtractor
-    from firecrawl.firecrawl import FirecrawlApp
+    # Intentamos importar desde el paquete instalado
+    from firecrawl import FirecrawlApp
 except ImportError:
     try:
-        from firecrawl import WebToTextExtractor, FirecrawlApp
+        # Si no funciona, intentamos importar desde el archivo local
+        from firecrawl import FirecrawlApp
     except ImportError:
-        raise ImportError("No se pudo importar FireCrawl. Asegúrate de tenerlo instalado con 'pip install firecrawl'")
+        raise ImportError("No se pudo importar FireCrawl. Asegúrate de tenerlo instalado con 'pip install firecrawl' o de tener el archivo firecrawl.py en el directorio")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -50,46 +49,51 @@ class DeepResearchAgent:
         # Set OpenAI API key
         self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
         if not self.openai_api_key:
-            raise ValueError("OpenAI API key is required. Please provide it or set OPENAI_API_KEY environment variable.")
+            raise ValueError("OpenAI API key is required. Set it as an argument or as OPENAI_API_KEY environment variable.")
         
+        # Set API key in environment and for OpenAI client
         os.environ["OPENAI_API_KEY"] = self.openai_api_key
+        openai.api_key = self.openai_api_key
         
-        # Initialize FireCrawl extractor
+        # Initialize FireCrawl
+        self.use_local_docker = use_local_docker
+        self.firecrawl_api_key = firecrawl_api_key or os.getenv("FIRECRAWL_API_KEY")
+        
+        # Initialize FireCrawl based on configuration
         if use_local_docker:
-            logger.info("Initializing FireCrawl with local Docker")
-            try:
-                self.extractor = WebToTextExtractor.create_with_local_docker()
-                logger.info("Successfully initialized FireCrawl with local Docker")
-            except Exception as e:
-                logger.error(f"Error initializing FireCrawl with local Docker: {str(e)}")
-                logger.info("Falling back to cloud API...")
-                self.extractor = self._initialize_cloud_api(firecrawl_api_key)
+            self._initialize_local_docker()
         else:
-            logger.info("Initializing FireCrawl with cloud API")
-            self.extractor = self._initialize_cloud_api(firecrawl_api_key)
-        
+            self._initialize_cloud_api()
+            
         # Initialize agents
         self.agents = self._create_agents()
-        logger.info("Initialized OpenAI Agents")
-    
-    def _initialize_cloud_api(self, firecrawl_api_key: Optional[str] = None):
-        """
-        Initialize FireCrawl with cloud API.
         
-        Args:
-            firecrawl_api_key: FireCrawl API key (if None, will try to get from environment)
-            
-        Returns:
-            WebToTextExtractor instance
-        """
-        api_key = firecrawl_api_key or os.getenv("FIRECRAWL_API_KEY")
-        if not api_key:
-            logger.warning("No FireCrawl API key provided. Some features may not work properly.")
-            return WebToTextExtractor()
-        else:
-            logger.info("Using FireCrawl cloud API with provided API key")
-            return WebToTextExtractor(api_key=api_key)
+        logger.info("DeepResearchAgent initialized successfully")
     
+    def _initialize_local_docker(self):
+        """Initialize FireCrawl using local Docker"""
+        logger.info("Initializing FireCrawl with local Docker")
+        try:
+            # Para Docker local, usamos localhost:3002 como URL de la API
+            self.firecrawl = FirecrawlApp(api_url="http://localhost:3002")
+            logger.info("FireCrawl initialized with local Docker")
+        except Exception as e:
+            logger.error(f"Error initializing FireCrawl with local Docker: {str(e)}")
+            raise ValueError(f"Failed to initialize FireCrawl with local Docker: {str(e)}")
+    
+    def _initialize_cloud_api(self):
+        """Initialize FireCrawl using cloud API"""
+        logger.info("Initializing FireCrawl with cloud API")
+        if not self.firecrawl_api_key:
+            raise ValueError("FireCrawl API key is required for cloud API. Set it as an argument or as FIRECRAWL_API_KEY environment variable.")
+        
+        try:
+            self.firecrawl = FirecrawlApp(api_key=self.firecrawl_api_key)
+            logger.info("FireCrawl initialized with cloud API")
+        except Exception as e:
+            logger.error(f"Error initializing FireCrawl with cloud API: {str(e)}")
+            raise ValueError(f"Failed to initialize FireCrawl with cloud API: {str(e)}")
+
     def _create_agents(self):
         """
         Create the agents used in the deep research system.
@@ -245,7 +249,7 @@ class DeepResearchAgent:
         """
         try:
             logger.info(f"Searching web for: {query}")
-            results = self.extractor.search_and_extract(
+            results = self.firecrawl.search_and_extract(
                 query=query,
                 limit=num_results,
                 formats=["markdown"]
@@ -292,7 +296,7 @@ class DeepResearchAgent:
         """
         try:
             logger.info(f"Starting deep research on: {query}")
-            research_results = self.extractor.deep_research(
+            research_results = self.firecrawl.deep_research(
                 query=query,
                 max_depth=max_depth,
                 max_urls=10,
@@ -339,7 +343,7 @@ class DeepResearchAgent:
         """
         try:
             logger.info(f"Extracting content from URL: {url}")
-            result = self.extractor.extract_from_url(
+            result = self.firecrawl.extract_from_url(
                 url=url,
                 formats=["markdown"],
                 extract_metadata=True
@@ -382,14 +386,14 @@ class DeepResearchAgent:
         """
         try:
             logger.info(f"Searching and extracting for: {query}")
-            results = self.extractor.search_and_extract(
+            results = self.firecrawl.search_and_extract(
                 query=query,
                 limit=num_results,
                 formats=["markdown"]
             )
             
             # Use the combine_results_for_llm method to format the results
-            combined_content = self.extractor.combine_results_for_llm(
+            combined_content = self.firecrawl.combine_results_for_llm(
                 results=results,
                 format="markdown",
                 include_metadata=True
@@ -418,42 +422,62 @@ class DeepResearchAgent:
         try:
             logger.info(f"Starting research on question: {question}")
             
-            # Step 1: Use the planner agent to analyze the question and create a research plan
+            # Step 1: Planning research
             logger.info("Step 1: Planning research")
-            planning_result = await Runner.run(
+            runner = Runner()
+            planning_result = await runner.run(
                 starting_agent=self.agents["planner"],
-                input=f"I need to research this topic thoroughly: {question}\n\nPlease analyze this question and create a research plan with specific search queries to investigate.",
+                input=question,
+                max_turns=20  # Aumentamos el número máximo de turnos
             )
-            
-            from agents.items import ItemHelpers
-            planning_output = ItemHelpers.text_message_outputs(planning_result.new_items)
+            planning_output = planning_result.final_output
             logger.info(f"Planning complete: {len(planning_output)} characters of output")
             
-            # Step 2: Use the researcher agent to gather information
+            # Step 2: Gathering information
             logger.info("Step 2: Gathering information")
-            research_result = await Runner.run(
+            runner = Runner()
+            research_result = await runner.run(
                 starting_agent=self.agents["researcher"],
-                input=f"I need to research this topic: {question}\n\nHere's the research plan and queries from our planning phase:\n\n{planning_output}\n\nPlease conduct thorough research using these queries and gather comprehensive information.",
+                input=f"Research question: {question}\n\nResearch plan:\n{planning_output}",
+                max_turns=20  # Aumentamos el número máximo de turnos
             )
-            
-            research_output = ItemHelpers.text_message_outputs(research_result.new_items)
+            research_output = research_result.final_output
             logger.info(f"Research complete: {len(research_output)} characters of output")
             
-            # Step 3: Use the synthesis agent to create a final response
-            logger.info("Step 3: Synthesizing information")
-            synthesis_result = await Runner.run(
+            # Step 3: Synthesizing findings
+            logger.info("Step 3: Synthesizing findings")
+            runner = Runner()
+            synthesis_result = await runner.run(
                 starting_agent=self.agents["synthesis"],
-                input=f"Original question: {question}\n\nResearch findings:\n\n{research_output}\n\nPlease synthesize this information into a comprehensive, well-structured answer to the original question.",
+                input=f"Original question: {question}\n\nResearch findings:\n{research_output}",
+                max_turns=20  # Aumentamos el número máximo de turnos
             )
+            synthesis_output = synthesis_result.final_output
+            logger.info(f"Synthesis complete: {len(synthesis_output)} characters of output")
             
-            final_output = ItemHelpers.text_message_outputs(synthesis_result.new_items)
-            logger.info(f"Synthesis complete: {len(final_output)} characters of output")
-            
-            return final_output
+            # Combine all results
+            final_result = f"""
+================================================================================
+RESULTADOS DE LA INVESTIGACIÓN:
+================================================================================
+
+{synthesis_output}
+
+================================================================================
+"""
+            return final_result
             
         except Exception as e:
             logger.error(f"Error in research: {str(e)}")
-            return f"Error performing research: {str(e)}"
+            return f"""
+================================================================================
+RESULTADOS DE LA INVESTIGACIÓN:
+================================================================================
+
+Error performing research: {str(e)}
+
+================================================================================
+"""
 
 def save_research_results(topic: str, results: str):
     """

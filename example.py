@@ -33,7 +33,7 @@ async def main():
     )
     
     # Ejemplo de pregunta de investigación
-    question = "¿Cuáles son las últimas tendencias en inteligencia artificial generativa?"
+    question = "¿Cuáles son las últimas tendencias en inteligencia artificial generativa en 2025?"
     
     print(f"\nInvestigando: {question}")
     print("Esto puede tardar unos minutos...")

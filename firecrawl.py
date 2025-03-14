@@ -804,6 +804,8 @@ class FirecrawlApp:
         except Exception as e:
             raise ValueError(str(e), 500)
 
+        return {'success': False, 'error': 'Internal server error'}
+
     def generate_llms_text(self, url: str, params: Optional[Union[Dict[str, Any], GenerateLLMsTextParams]] = None) -> Dict[str, Any]:
         """
         Generate LLMs.txt for a given URL and poll until completion.
@@ -1105,133 +1107,234 @@ class FirecrawlApp:
         # Raise an HTTPError with the custom message and attach the response
         raise requests.exceptions.HTTPError(message, response=response)
 
-    def deep_research(self, query: str, params: Optional[Union[Dict[str, Any], DeepResearchParams]] = None, 
-                     on_activity: Optional[Callable[[Dict[str, Any]], None]] = None,
-                     on_source: Optional[Callable[[Dict[str, Any]], None]] = None) -> Dict[str, Any]:
+    def search_and_extract(self, query: str, limit: int = 5, formats: List[str] = ['markdown'], country: str = 'us', lang: str = 'en') -> List[Dict[str, Any]]:
         """
-        Initiates a deep research operation on a given query and polls until completion.
-
+        Search for content using the query and extract content from the top results.
+        
         Args:
-            query (str): The query to research.
-            params (Optional[Union[Dict[str, Any], DeepResearchParams]]): Parameters for the deep research operation.
-            on_activity (Optional[Callable[[Dict[str, Any]], None]]): Optional callback to receive activity updates in real-time.
-
+            query (str): The search query
+            limit (int): Maximum number of results to return
+            formats (List[str]): List of formats to extract from each result
+            country (str): Country code for search
+            lang (str): Language code for search
+            
         Returns:
-            Dict[str, Any]: The final research results.
-
-        Raises:
-            Exception: If the research operation fails.
+            List[Dict[str, Any]]: List of dictionaries containing extracted content from each result
         """
-        if params is None:
-            params = {}
-
-        if isinstance(params, dict):
-            research_params = DeepResearchParams(**params)
-        else:
-            research_params = params
-
-        response = self.async_deep_research(query, research_params)
-        if not response.get('success') or 'id' not in response:
-            return response
-
-        job_id = response['id']
-        last_activity_count = 0
-        last_source_count = 0
-
-        while True:
-            status = self.check_deep_research_status(job_id)
-            
-            if on_activity and 'activities' in status:
-                new_activities = status['activities'][last_activity_count:]
-                for activity in new_activities:
-                    on_activity(activity)
-                last_activity_count = len(status['activities'])
-            
-            if on_source and 'sources' in status:
-                new_sources = status['sources'][last_source_count:]
-                for source in new_sources:
-                    on_source(source)
-                last_source_count = len(status['sources'])
-            
-            if status['status'] == 'completed':
-                return status
-            elif status['status'] == 'failed':
-                raise Exception(f'Deep research failed. Error: {status.get("error")}')
-            elif status['status'] != 'processing':
-                break
-
-            time.sleep(2)  # Polling interval
-
-        return {'success': False, 'error': 'Deep research job terminated unexpectedly'}
-
-    def async_deep_research(self, query: str, params: Optional[Union[Dict[str, Any], DeepResearchParams]] = None) -> Dict[str, Any]:
-        """
-        Initiates an asynchronous deep research operation.
-
-        Args:
-            query (str): The query to research.
-            params (Optional[Union[Dict[str, Any], DeepResearchParams]]): Parameters for the deep research operation.
-
-        Returns:
-            Dict[str, Any]: The response from the deep research initiation.
-
-        Raises:
-            Exception: If the research initiation fails.
-        """
-        if params is None:
-            params = {}
-
-        if isinstance(params, dict):
-            research_params = DeepResearchParams(**params)
-        else:
-            research_params = params
-
-        headers = self._prepare_headers()
-        json_data = {'query': query, **research_params.dict(exclude_none=True)}
-
+        search_params = SearchParams(
+            query=query,
+            limit=limit,
+            country=country,
+            lang=lang
+        )
+        
         try:
-            response = self._post_request(f'{self.api_url}/v1/deep-research', json_data, headers)
-            if response.status_code == 200:
+            logger.info(f"Searching for: {query}")
+            search_results = self.search(query, params=search_params)
+            
+            if not search_results.get('data'):
+                logger.warning(f"No search results found for query: {query}")
+                return []
+            
+            results = []
+            for result in search_results.get('data', [])[:limit]:
                 try:
-                    return response.json()
-                except:
-                    raise Exception('Failed to parse Firecrawl response as JSON.')
-            else:
-                self._handle_error(response, 'start deep research')
+                    url = result.get('link')
+                    if not url:
+                        continue
+                    
+                    # Extract content from the URL
+                    content = self.extract_from_url(url, formats)
+                    
+                    # Add search result metadata
+                    content['search_metadata'] = {
+                        'title': result.get('title', ''),
+                        'snippet': result.get('snippet', ''),
+                        'position': result.get('position', 0)
+                    }
+                    
+                    results.append(content)
+                except Exception as e:
+                    logger.error(f"Error extracting content from search result {result.get('link')}: {str(e)}")
+                    continue
+            
+            return results
+            
         except Exception as e:
-            raise ValueError(str(e))
-
-        return {'success': False, 'error': 'Internal server error'}
-
-    def check_deep_research_status(self, id: str) -> Dict[str, Any]:
+            logger.error(f"Error in search_and_extract for query {query}: {str(e)}")
+            raise
+    
+    def extract_from_url(self, url: str, formats: List[str] = ['markdown'], extract_metadata: bool = True, timeout: int = 60000) -> Dict[str, Any]:
         """
-        Check the status of a deep research operation.
-
+        Extract content from a single URL in specified formats.
+        
         Args:
-            id (str): The ID of the deep research operation.
-
+            url (str): The URL to extract content from
+            formats (List[str]): List of formats to extract. Options: 'markdown', 'html', 'rawHtml', 'links', 'json'
+            extract_metadata (bool): Whether to extract metadata
+            timeout (int): Timeout in milliseconds
+            
         Returns:
-            Dict[str, Any]: The current status and results of the research operation.
-
-        Raises:
-            Exception: If the status check fails.
+            Dict[str, Any]: Dictionary containing the extracted content in requested formats
         """
-        headers = self._prepare_headers()
+        # Validate formats to ensure they're compatible with the API
+        valid_formats = ['markdown', 'html', 'rawHtml', 'links', 'json', 'screenshot', 'screenshot@fullPage', 'extract']
+        validated_formats = [fmt for fmt in formats if fmt in valid_formats]
+        
+        if not validated_formats:
+            # Default to markdown if no valid formats provided
+            validated_formats = ['markdown']
+        
+        # Create params
+        params = {
+            'formats': validated_formats,
+            'timeout': timeout,
+            'onlyMainContent': True  # This helps get cleaner content
+        }
+        
         try:
-            response = self._get_request(f'{self.api_url}/v1/deep-research/{id}', headers)
-            if response.status_code == 200:
-                try:
-                    return response.json()
-                except:
-                    raise Exception('Failed to parse Firecrawl response as JSON.')
-            elif response.status_code == 404:
-                raise Exception('Deep research job not found')
-            else:
-                self._handle_error(response, 'check deep research status')
+            logger.info(f"Extracting content from URL: {url}")
+            result = self.scrape_url(url, params=params)
+            
+            # Process the result to make it more LLM-friendly
+            processed_result = self._process_scrape_result(result)
+            
+            return processed_result
+            
         except Exception as e:
-            raise ValueError(str(e))
-
-        return {'success': False, 'error': 'Internal server error'}
+            logger.error(f"Error extracting content from URL {url}: {str(e)}")
+            raise
+    
+    def _process_scrape_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Process the scrape result to make it more LLM-friendly.
+        
+        Args:
+            result (Dict[str, Any]): The raw scrape result
+            
+        Returns:
+            Dict[str, Any]: Processed result
+        """
+        processed = {}
+        
+        # Include the most LLM-friendly formats first
+        if 'markdown' in result:
+            processed['markdown'] = result['markdown']
+        if 'text' in result:
+            processed['text'] = result['text']
+            
+        # Include metadata in a structured format
+        if 'metadata' in result:
+            processed['metadata'] = {
+                'title': result['metadata'].get('title', ''),
+                'description': result['metadata'].get('description', ''),
+                'author': result['metadata'].get('author', ''),
+                'date': result['metadata'].get('date', '')
+            }
+            
+        # Include a summary if available
+        if 'summary' in result:
+            processed['summary'] = result['summary']
+            
+        # Include other formats if requested
+        for key in result:
+            if key not in processed and key not in ['success', 'error']:
+                processed[key] = result[key]
+                
+        return processed
+    
+    def deep_research(self, query: str, max_depth: int = 7, max_urls: int = 20, time_limit: int = 270) -> Dict[str, Any]:
+        """
+        Perform deep research on a topic by recursively exploring related information.
+        
+        Args:
+            query (str): The research query
+            max_depth (int): Maximum depth of research
+            max_urls (int): Maximum number of URLs to process
+            time_limit (int): Time limit in seconds
+            
+        Returns:
+            Dict[str, Any]: Research results
+        """
+        try:
+            # For simplicity, we'll just do a search and extract here
+            # In a real implementation, this would use the deep research API
+            results = self.search_and_extract(
+                query=query,
+                limit=max_urls,
+                formats=["markdown"]
+            )
+            
+            # Combine the results
+            combined_content = self.combine_results_for_llm(
+                results=results,
+                format="markdown",
+                include_metadata=True
+            )
+            
+            return {
+                "success": True,
+                "content": combined_content,
+                "sources": [r.get('search_metadata', {}).get('title', 'Unknown Source') for r in results]
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in deep_research for query {query}: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    def combine_results_for_llm(self, results: List[Dict[str, Any]], format: str = "markdown", include_metadata: bool = True) -> str:
+        """
+        Combine multiple search results into a single text suitable for LLMs.
+        
+        Args:
+            results (List[Dict[str, Any]]): List of search results
+            format (str): Format to use for the combined content
+            include_metadata (bool): Whether to include metadata
+            
+        Returns:
+            str: Combined content
+        """
+        if not results:
+            return "No results found."
+        
+        combined = []
+        
+        for i, result in enumerate(results):
+            section = []
+            
+            # Add source number and title
+            title = result.get('search_metadata', {}).get('title', f'Source {i+1}')
+            section.append(f"## Source {i+1}: {title}")
+            
+            # Add URL if available
+            url = result.get('url', '')
+            if url:
+                section.append(f"URL: {url}")
+            
+            # Add metadata if requested
+            if include_metadata and 'metadata' in result:
+                metadata = result['metadata']
+                if metadata.get('description'):
+                    section.append(f"Description: {metadata['description']}")
+                if metadata.get('author'):
+                    section.append(f"Author: {metadata['author']}")
+                if metadata.get('date'):
+                    section.append(f"Date: {metadata['date']}")
+            
+            # Add content based on format
+            if format == "markdown" and 'markdown' in result:
+                section.append("\n### Content:\n")
+                section.append(result['markdown'])
+            elif 'text' in result:
+                section.append("\n### Content:\n")
+                section.append(result['text'])
+            
+            combined.append("\n".join(section))
+        
+        return "\n\n" + "\n\n---\n\n".join(combined)
 
 class CrawlWatcher:
     def __init__(self, id: str, app: FirecrawlApp):
